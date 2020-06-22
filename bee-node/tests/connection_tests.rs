@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bee_main::Bee;
+use bee_node::BeeNode;
 
 /// Test Description:
 ///  1) Create two Bees A and B at different network addresses and peer them.
@@ -20,4 +20,6 @@ use bee_main::Bee;
 ///
 ///  The test is successful, if both nodes end up synced.
 #[test]
-fn connection_between_two_bees() {}
+fn connection_between_two_bees() {
+    println!("connection_between_two_bees");
+}
