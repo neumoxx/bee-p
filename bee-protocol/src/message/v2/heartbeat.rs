@@ -21,11 +21,11 @@ const CONSTANT_SIZE: usize = SOLID_MILESTONE_INDEX_SIZE + SNAPSHOT_MILESTONE_IND
 
 /// A message that informs about the part of the tangle currently being fully stored by a node.
 /// This message is sent when a node:
-/// * just got paired to another node;
-/// * did a local snapshot and pruned away a part of the tangle;
-/// * solidified a new milestone;
+/// - just got paired to another node;
+/// - did a local snapshot and pruned away a part of the tangle;
+/// - solidified a new milestone;
 /// It also helps other nodes to know if they can ask it a specific transaction.
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub(crate) struct Heartbeat {
     /// Index of the last solid milestone.
     pub(crate) solid_milestone_index: u32,
@@ -76,8 +76,8 @@ mod tests {
 
     use super::*;
 
-    const FIRST_SOLID_MILESTONE_INDEX: u32 = 0x3dc297b4;
-    const LAST_SOLID_MILESTONE_INDEX: u32 = 0x01181f9b;
+    const FIRST_SOLID_MILESTONE_INDEX: u32 = 0x3dc2_97b4;
+    const LAST_SOLID_MILESTONE_INDEX: u32 = 0x0118_1f9b;
 
     #[test]
     fn id() {

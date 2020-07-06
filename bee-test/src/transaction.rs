@@ -11,8 +11,13 @@
 
 use crate::field::rand_trits_field;
 
-use bee_bundle::{
-    Address, Hash, Index, Nonce, Payload, Tag, Timestamp, Transaction, TransactionBuilder, TransactionField, Value,
+use bee_crypto::ternary::Hash;
+use bee_transaction::{
+    bundled::{
+        Address, BundledTransaction as Transaction, BundledTransactionBuilder as TransactionBuilder,
+        BundledTransactionField, Index, Nonce, Payload, Tag, Timestamp, Value,
+    },
+    TransactionVertex,
 };
 
 pub fn clone_tx(tx: &Transaction) -> Transaction {
@@ -36,8 +41,8 @@ pub fn clone_tx(tx: &Transaction) -> Transaction {
     builder.build().unwrap()
 }
 
-pub fn create_random_tx() -> (bee_bundle::Hash, bee_bundle::Transaction) {
-    let builder = bee_bundle::TransactionBuilder::new()
+pub fn create_random_tx() -> (Hash, Transaction) {
+    let builder = TransactionBuilder::new()
         .with_payload(Payload::zeros())
         .with_address(rand_trits_field::<Address>())
         .with_value(Value::from_inner_unchecked(0))

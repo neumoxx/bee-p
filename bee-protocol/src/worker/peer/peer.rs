@@ -10,13 +10,14 @@
 // See the License for the specific language governing permissions and limitations under the License.
 
 use crate::{
-    message::{tlv_from_bytes, Header, Heartbeat, Message, MilestoneRequest, TransactionBroadcast, TransactionRequest},
+    message::{
+        tlv_from_bytes, Header, Heartbeat, Message, MilestoneRequest, Transaction as TransactionMessage,
+        TransactionRequest,
+    },
     peer::HandshakedPeer,
     protocol::Protocol,
     worker::{MilestoneResponderWorkerEvent, TransactionResponderWorkerEvent, TransactionWorkerEvent},
 };
-
-use std::sync::Arc;
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -24,7 +25,10 @@ use futures::{
     sink::SinkExt,
     stream::StreamExt,
 };
-use log::*;
+use futures_util::{future, stream};
+use log::{debug, error, info, warn};
+
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub(crate) enum PeerWorkerError {
@@ -60,17 +64,15 @@ impl PeerWorker {
 
     pub async fn run(
         mut self,
-        mut receiver_fused: futures_util::stream::Fuse<mpsc::Receiver<Vec<u8>>>,
-        mut shutdown_fused: futures_util::future::Fuse<oneshot::Receiver<()>>,
+        mut receiver_fused: stream::Fuse<mpsc::Receiver<Vec<u8>>>,
+        mut shutdown_fused: future::Fuse<oneshot::Receiver<()>>,
     ) {
-        info!("[PeerWorker({})] Running.", self.peer.address);
+        info!("[{}] Running.", self.peer.address);
 
         let mut context = PeerReadContext {
             state: PeerReadState::Header,
             buffer: Vec::new(),
         };
-        // let mut receiver_fused = receiver.fuse();
-        // let mut shutdown_fused = shutdown.fuse();
 
         loop {
             select! {
@@ -85,15 +87,15 @@ impl PeerWorker {
             }
         }
 
-        info!("[PeerWorker({})] Stopped.", self.peer.address);
+        info!("[{}] Stopped.", self.peer.address);
 
-        Protocol::get().peer_manager.remove(&self.peer.epid);
+        Protocol::get().peer_manager.remove(&self.peer.epid).await;
     }
 
     async fn process_message(&mut self, header: &Header, bytes: &[u8]) -> Result<(), PeerWorkerError> {
         match header.message_type {
             MilestoneRequest::ID => {
-                debug!("[PeerWorker({})] Reading MilestoneRequest...", self.peer.address);
+                debug!("[{}] Reading MilestoneRequest...", self.peer.address);
                 match tlv_from_bytes::<MilestoneRequest>(&header, bytes) {
                     Ok(message) => {
                         self.milestone_responder_worker
@@ -108,36 +110,30 @@ impl PeerWorker {
                         Protocol::get().metrics.milestone_request_received_inc();
                     }
                     Err(e) => {
-                        warn!(
-                            "[PeerWorker({})] Reading MilestoneRequest failed: {:?}.",
-                            self.peer.address, e
-                        );
+                        warn!("[{}] Reading MilestoneRequest failed: {:?}.", self.peer.address, e);
 
                         self.peer.metrics.invalid_messages_received_inc();
                         Protocol::get().metrics.invalid_messages_received_inc();
                     }
                 }
             }
-            TransactionBroadcast::ID => {
-                debug!("[PeerWorker({})] Reading TransactionBroadcast...", self.peer.address);
-                match tlv_from_bytes::<TransactionBroadcast>(&header, bytes) {
+            TransactionMessage::ID => {
+                debug!("[{}] Reading TransactionMessage...", self.peer.address);
+                match tlv_from_bytes::<TransactionMessage>(&header, bytes) {
                     Ok(message) => {
                         self.transaction_worker
                             .send(TransactionWorkerEvent {
                                 from: self.peer.epid,
-                                transaction_broadcast: message,
+                                transaction: message,
                             })
                             .await
                             .map_err(|_| PeerWorkerError::FailedSend)?;
 
-                        self.peer.metrics.transaction_broadcast_received_inc();
-                        Protocol::get().metrics.transaction_broadcast_received_inc();
+                        self.peer.metrics.transaction_received_inc();
+                        Protocol::get().metrics.transaction_received_inc();
                     }
                     Err(e) => {
-                        warn!(
-                            "[PeerWorker({})] Reading TransactionBroadcast failed: {:?}.",
-                            self.peer.address, e
-                        );
+                        warn!("[{}] Reading TransactionMessage failed: {:?}.", self.peer.address, e);
 
                         self.peer.metrics.invalid_messages_received_inc();
                         Protocol::get().metrics.invalid_messages_received_inc();
@@ -145,7 +141,7 @@ impl PeerWorker {
                 }
             }
             TransactionRequest::ID => {
-                debug!("[PeerWorker({})] Reading TransactionRequest...", self.peer.address);
+                debug!("[{}] Reading TransactionRequest...", self.peer.address);
                 match tlv_from_bytes::<TransactionRequest>(&header, bytes) {
                     Ok(message) => {
                         self.transaction_responder_worker
@@ -160,10 +156,7 @@ impl PeerWorker {
                         Protocol::get().metrics.transaction_request_received_inc();
                     }
                     Err(e) => {
-                        warn!(
-                            "[PeerWorker({})] Reading TransactionRequest failed: {:?}.",
-                            self.peer.address, e
-                        );
+                        warn!("[{}] Reading TransactionRequest failed: {:?}.", self.peer.address, e);
 
                         self.peer.metrics.invalid_messages_received_inc();
                         Protocol::get().metrics.invalid_messages_received_inc();
@@ -171,17 +164,19 @@ impl PeerWorker {
                 }
             }
             Heartbeat::ID => {
-                debug!("[PeerWorker({})] Reading Heartbeat...", self.peer.address);
+                debug!("[{}] Reading Heartbeat...", self.peer.address);
                 match tlv_from_bytes::<Heartbeat>(&header, bytes) {
                     Ok(message) => {
-                        self.peer.set_solid_milestone_index(message.solid_milestone_index);
-                        self.peer.set_snapshot_milestone_index(message.snapshot_milestone_index);
+                        self.peer
+                            .set_solid_milestone_index(message.solid_milestone_index.into());
+                        self.peer
+                            .set_snapshot_milestone_index(message.snapshot_milestone_index.into());
 
                         self.peer.metrics.heartbeat_received_inc();
                         Protocol::get().metrics.heartbeat_received_inc();
                     }
                     Err(e) => {
-                        warn!("[PeerWorker({})] Reading Heartbeat failed: {:?}.", self.peer.address, e);
+                        warn!("[{}] Reading Heartbeat failed: {:?}.", self.peer.address, e);
 
                         self.peer.metrics.invalid_messages_received_inc();
                         Protocol::get().metrics.invalid_messages_received_inc();
@@ -189,7 +184,10 @@ impl PeerWorker {
                 }
             }
             _ => {
-                warn!("[PeerWorker({})] Ignoring unsupported message.", self.peer.address);
+                warn!(
+                    "[{}] Ignoring unsupported message type: {}.",
+                    self.peer.address, header.message_type
+                );
 
                 self.peer.metrics.invalid_messages_received_inc();
                 Protocol::get().metrics.invalid_messages_received_inc();
@@ -213,9 +211,9 @@ impl PeerWorker {
             context.state = match context.state {
                 PeerReadState::Header => {
                     if offset + 3 <= context.buffer.len() {
-                        debug!("[PeerWorker({})] Reading Header...", self.peer.address);
+                        debug!("[{}] Reading Header...", self.peer.address);
                         let header = Header::from_bytes(&context.buffer[offset..offset + 3]);
-                        offset = offset + 3;
+                        offset += 3;
 
                         PeerReadState::Payload(header)
                     } else {
@@ -233,13 +231,10 @@ impl PeerWorker {
                             )
                             .await
                         {
-                            error!(
-                                "[PeerWorker({})] Processing message failed: {:?}.",
-                                self.peer.address, e
-                            );
+                            error!("[{}] Processing message failed: {:?}.", self.peer.address, e);
                         }
 
-                        offset = offset + header.message_length as usize;
+                        offset += header.message_length as usize;
 
                         PeerReadState::Header
                     } else {

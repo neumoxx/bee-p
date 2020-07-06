@@ -9,7 +9,7 @@
 // an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and limitations under the License.
 
-use bee_common::constants::TRANSACTION_BYTE_LEN;
+use bee_transaction::bundled::TRANSACTION_BYTE_LEN;
 
 const NON_PAYLOAD_SIZE: usize = 292;
 const MAX_PAYLOAD_SIZE: usize = 1312;
@@ -22,7 +22,7 @@ pub(crate) fn compress_transaction_bytes(bytes: &[u8]) -> Vec<u8> {
         if bytes[i] != 0 {
             break;
         }
-        trimmed_size = trimmed_size + 1;
+        trimmed_size += 1;
     }
 
     let mut compresses_bytes = vec![0u8; MAX_PAYLOAD_SIZE - trimmed_size + NON_PAYLOAD_SIZE];

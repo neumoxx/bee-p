@@ -23,9 +23,9 @@
 
 #![allow(dead_code, unused_imports)]
 
+use bee_common_ext::shutdown::Shutdown;
 use bee_network::{
-    Command::*, EndpointId as EpId, Event, EventSubscriber as Events, Network, NetworkConfig, NetworkConfigBuilder,
-    Origin, Shutdown, Url,
+    Command::*, EndpointId as EpId, Event, EventSubscriber as Events, Network, NetworkConfig, Origin, Url,
 };
 
 use common::*;
@@ -40,10 +40,11 @@ mod common;
 fn main() {
     let args = Args::from_args();
     let config = args.make_config();
+    let mut shutdown = Shutdown::new();
 
     logger::init(log::LevelFilter::Info);
 
-    let (network, shutdown, events) = bee_network::init(NetworkConfigBuilder::new().build());
+    let (network, events) = bee_network::init(NetworkConfig::build().finish(), &mut shutdown);
 
     let mut node = Node::builder()
         .with_network(network.clone())
@@ -121,9 +122,14 @@ impl Node {
 
         info!("[.....] Shutting down...");
 
-        self.shutdown.execute().await;
-
-        info!("[.....] Shutdown complete. See you soon!");
+        match self.shutdown.execute().await {
+            Ok(()) => {
+                info!("Shutdown complete. See you soon!");
+            }
+            Err(e) => {
+                error!("Shutdown failed. Error was {}", e);
+            }
+        }
     }
 
     fn block_on_ctrl_c(&self) {

@@ -22,7 +22,7 @@
 //! * very few dependencies
 //! * well documented
 
-#![deny(missing_docs)]
+#![warn(missing_docs)]
 #![recursion_limit = "1024"]
 
 pub use address::{url::Url, Address, Port};
@@ -32,7 +32,6 @@ pub use endpoint::{origin::Origin, Endpoint, EndpointId};
 pub use events::{Event, EventSubscriber};
 
 pub use network::Network;
-pub use shutdown::Shutdown;
 
 mod address;
 mod commands;
@@ -41,7 +40,6 @@ mod endpoint;
 mod errors;
 mod events;
 mod network;
-mod shutdown;
 mod tcp;
 // mod udp;
 mod config;
@@ -52,16 +50,16 @@ use events::EventSubscriber as Events;
 use tcp::worker::TcpWorker;
 // use udp::worker::UdpWorker;
 
+use bee_common_ext::shutdown::Shutdown;
+
 use async_std::task::spawn;
 use futures::channel::oneshot;
 
 /// Initializes the network layer.
-pub fn init(config: NetworkConfig) -> (Network, Shutdown, Events) {
+pub fn init(config: NetworkConfig, shutdown: &mut Shutdown) -> (Network, Events) {
     let (command_sender, commands) = commands::command_channel();
     let (event_sender, events) = events::event_channel();
     let (internal_event_sender, internal_events) = events::event_channel();
-
-    let mut shutdown = Shutdown::new();
 
     let (epw_sd_sender, epw_shutdown) = oneshot::channel();
     let (tcp_sd_sender, tcp_shutdown) = oneshot::channel();
@@ -73,6 +71,7 @@ pub fn init(config: NetworkConfig) -> (Network, Shutdown, Events) {
         epw_shutdown,
         internal_event_sender.clone(),
         event_sender,
+        config.reconnect_interval,
     );
 
     let tcp_worker = TcpWorker::new(config.socket_addr(), internal_event_sender, tcp_shutdown);
@@ -82,11 +81,12 @@ pub fn init(config: NetworkConfig) -> (Network, Shutdown, Events) {
     shutdown.add_notifier(tcp_sd_sender);
     // shutdown.add_notifier(udp_sd_sender);
 
-    shutdown.add_task(spawn(ep_worker.run()));
-    shutdown.add_task(spawn(tcp_worker.run()));
-    // shutdown.add_task(spawn(udp_worker.run()));
+    shutdown.add_worker_shutdown(spawn(ep_worker.run()));
+    shutdown.add_worker_shutdown(spawn(tcp_worker.run()));
+    // shutdown.add_worker(spawn(udp_worker.run()));
 
     whitelist::init();
+    shutdown.add_action(|| whitelist::drop());
 
-    (Network::new(command_sender), shutdown, events)
+    (Network::new(config, command_sender), events)
 }

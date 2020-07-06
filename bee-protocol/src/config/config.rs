@@ -9,9 +9,9 @@
 // an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and limitations under the License.
 
-use bee_bundle::{Address, TransactionField};
-use bee_crypto::SpongeType;
+use bee_crypto::ternary::SpongeType;
 use bee_ternary::{T1B1Buf, T5B1Buf, TryteBuf};
+use bee_transaction::bundled::{Address, BundledTransactionField};
 
 use bytemuck::cast_slice;
 use serde::Deserialize;
@@ -23,7 +23,7 @@ const DEFAULT_COO_PUBLIC_KEY: &str =
 const DEFAULT_COO_SECURITY: u8 = 2;
 const DEFAULT_COO_SPONGE_TYPE: &str = "kerl";
 const DEFAULT_MILESTONE_REQUEST_SEND_WORKER_BOUND: usize = 1000;
-const DEFAULT_TRANSACTION_BROADCAST_SEND_WORKER_BOUND: usize = 1000;
+const DEFAULT_TRANSACTION_SEND_WORKER_BOUND: usize = 1000;
 const DEFAULT_TRANSACTION_REQUEST_SEND_WORKER_BOUND: usize = 1000;
 const DEFAULT_HEARTBEAT_SEND_WORKER_BOUND: usize = 1000;
 const DEFAULT_MILESTONE_VALIDATOR_WORKER_BOUND: usize = 1000;
@@ -37,6 +37,8 @@ const DEFAULT_TRANSACTION_REQUESTER_WORKER_BOUND: usize = 1000;
 const DEFAULT_MILESTONE_REQUESTER_WORKER_BOUND: usize = 1000;
 const DEFAULT_RECEIVER_WORKER_BOUND: usize = 1000;
 const DEFAULT_BROADCASTER_WORKER_BOUND: usize = 1000;
+const DEFAULT_STATUS_INTERVAL: u64 = 10;
+const DEFAULT_HANDSHAKE_WINDOW: u64 = 10;
 
 #[derive(Default, Deserialize)]
 struct ProtocolCoordinatorConfigBuilder {
@@ -49,7 +51,7 @@ struct ProtocolCoordinatorConfigBuilder {
 #[derive(Default, Deserialize)]
 struct ProtocolWorkersConfigBuilder {
     milestone_request_send_worker_bound: Option<usize>,
-    transaction_broadcast_send_worker_bound: Option<usize>,
+    transaction_send_worker_bound: Option<usize>,
     transaction_request_send_worker_bound: Option<usize>,
     heartbeat_send_worker_bound: Option<usize>,
     milestone_validator_worker_bound: Option<usize>,
@@ -63,6 +65,7 @@ struct ProtocolWorkersConfigBuilder {
     milestone_requester_worker_bound: Option<usize>,
     receiver_worker_bound: Option<usize>,
     broadcaster_worker_bound: Option<usize>,
+    status_interval: Option<u64>,
 }
 
 #[derive(Default, Deserialize)]
@@ -70,6 +73,7 @@ pub struct ProtocolConfigBuilder {
     mwm: Option<u8>,
     coordinator: ProtocolCoordinatorConfigBuilder,
     workers: ProtocolWorkersConfigBuilder,
+    handshake_window: Option<u64>,
 }
 
 impl ProtocolConfigBuilder {
@@ -104,15 +108,15 @@ impl ProtocolConfigBuilder {
 
     pub fn milestone_request_send_worker_bound(mut self, milestone_request_send_worker_bound: usize) -> Self {
         self.workers
-            .transaction_broadcast_send_worker_bound
+            .transaction_send_worker_bound
             .replace(milestone_request_send_worker_bound);
         self
     }
 
-    pub fn transaction_broadcast_send_worker_bound(mut self, transaction_broadcast_send_worker_bound: usize) -> Self {
+    pub fn transaction_send_worker_bound(mut self, transaction_send_worker_bound: usize) -> Self {
         self.workers
-            .transaction_broadcast_send_worker_bound
-            .replace(transaction_broadcast_send_worker_bound);
+            .transaction_send_worker_bound
+            .replace(transaction_send_worker_bound);
         self
     }
 
@@ -199,11 +203,21 @@ impl ProtocolConfigBuilder {
         self
     }
 
-    pub fn build(self) -> ProtocolConfig {
+    pub fn status_interval(mut self, status_interval: u64) -> Self {
+        self.workers.status_interval.replace(status_interval);
+        self
+    }
+
+    pub fn handshake_window(mut self, handshake_window: u64) -> Self {
+        self.handshake_window.replace(handshake_window);
+        self
+    }
+
+    pub fn finish(self) -> ProtocolConfig {
         let coo_sponge_type = match self
             .coordinator
             .sponge_type
-            .unwrap_or(DEFAULT_COO_SPONGE_TYPE.to_owned())
+            .unwrap_or_else(|| DEFAULT_COO_SPONGE_TYPE.to_owned())
             .as_str()
         {
             "kerl" => SpongeType::Kerl,
@@ -219,19 +233,24 @@ impl ProtocolConfigBuilder {
                 .encode::<T1B1Buf>(),
         );
 
-        let coo_public_key =
-            match TryteBuf::try_from_str(&self.coordinator.public_key.unwrap_or(DEFAULT_COO_PUBLIC_KEY.to_owned())) {
-                Ok(trytes) => match Address::try_from_inner(trytes.as_trits().encode::<T1B1Buf>()) {
-                    Ok(coo_public_key) => coo_public_key,
-                    Err(_) => coo_public_key_default,
-                },
+        let coo_public_key = match TryteBuf::try_from_str(
+            &self
+                .coordinator
+                .public_key
+                .unwrap_or_else(|| DEFAULT_COO_PUBLIC_KEY.to_owned()),
+        ) {
+            Ok(trytes) => match Address::try_from_inner(trytes.as_trits().encode::<T1B1Buf>()) {
+                Ok(coo_public_key) => coo_public_key,
                 Err(_) => coo_public_key_default,
-            };
+            },
+            Err(_) => coo_public_key_default,
+        };
 
         let mut public_key_bytes = [0u8; 49];
         public_key_bytes.copy_from_slice(cast_slice(coo_public_key.to_inner().encode::<T5B1Buf>().as_i8_slice()));
 
         ProtocolConfig {
+            null_address: Address::zeros(),
             mwm: self.mwm.unwrap_or(DEFAULT_MWM),
             coordinator: ProtocolCoordinatorConfig {
                 depth: self.coordinator.depth.unwrap_or(DEFAULT_COO_DEPTH),
@@ -241,15 +260,14 @@ impl ProtocolConfigBuilder {
                 sponge_type: coo_sponge_type,
             },
             workers: ProtocolWorkersConfig {
-                null_address: Address::zeros(),
                 milestone_request_send_worker_bound: self
                     .workers
                     .milestone_request_send_worker_bound
                     .unwrap_or(DEFAULT_MILESTONE_REQUEST_SEND_WORKER_BOUND),
-                transaction_broadcast_send_worker_bound: self
+                transaction_send_worker_bound: self
                     .workers
-                    .transaction_broadcast_send_worker_bound
-                    .unwrap_or(DEFAULT_TRANSACTION_BROADCAST_SEND_WORKER_BOUND),
+                    .transaction_send_worker_bound
+                    .unwrap_or(DEFAULT_TRANSACTION_SEND_WORKER_BOUND),
                 transaction_request_send_worker_bound: self
                     .workers
                     .transaction_request_send_worker_bound
@@ -302,7 +320,9 @@ impl ProtocolConfigBuilder {
                     .workers
                     .broadcaster_worker_bound
                     .unwrap_or(DEFAULT_BROADCASTER_WORKER_BOUND),
+                status_interval: self.workers.status_interval.unwrap_or(DEFAULT_STATUS_INTERVAL),
             },
+            handshake_window: self.handshake_window.unwrap_or(DEFAULT_HANDSHAKE_WINDOW),
         }
     }
 }
@@ -318,9 +338,8 @@ pub struct ProtocolCoordinatorConfig {
 
 #[derive(Clone)]
 pub struct ProtocolWorkersConfig {
-    pub(crate) null_address: Address,
     pub(crate) milestone_request_send_worker_bound: usize,
-    pub(crate) transaction_broadcast_send_worker_bound: usize,
+    pub(crate) transaction_send_worker_bound: usize,
     pub(crate) transaction_request_send_worker_bound: usize,
     pub(crate) heartbeat_send_worker_bound: usize,
     pub(crate) milestone_validator_worker_bound: usize,
@@ -334,13 +353,22 @@ pub struct ProtocolWorkersConfig {
     pub(crate) milestone_requester_worker_bound: usize,
     pub(crate) receiver_worker_bound: usize,
     pub(crate) broadcaster_worker_bound: usize,
+    pub(crate) status_interval: u64,
 }
 
 #[derive(Clone)]
 pub struct ProtocolConfig {
+    pub(crate) null_address: Address,
     pub(crate) mwm: u8,
     pub(crate) coordinator: ProtocolCoordinatorConfig,
     pub(crate) workers: ProtocolWorkersConfig,
+    pub(crate) handshake_window: u64,
+}
+
+impl ProtocolConfig {
+    pub fn build() -> ProtocolConfigBuilder {
+        ProtocolConfigBuilder::new()
+    }
 }
 
 // TODO move out of here

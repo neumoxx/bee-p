@@ -9,7 +9,7 @@
 // an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and limitations under the License.
 
-use bee_bundle::Address;
+use bee_transaction::bundled::Address;
 
 use std::collections::HashMap;
 
@@ -43,7 +43,7 @@ impl LedgerWorker {
                     if *balance as i64 + value >= 0 {
                         *balance = (*balance as i64 + value) as u64;
                     } else {
-                        warn!("[LedgerWorker ] Ignoring conflicting diff.");
+                        warn!("Ignoring conflicting diff.");
                     }
                 })
                 .or_insert(value as u64);
@@ -52,12 +52,12 @@ impl LedgerWorker {
 
     fn get_balance(&self, address: Address, sender: oneshot::Sender<Option<u64>>) {
         if let Err(e) = sender.send(self.state.get(&address).cloned()) {
-            warn!("[LedgerWorker ] Failed to send balance: {:?}.", e);
+            warn!("Failed to send balance: {:?}.", e);
         }
     }
 
     pub async fn run(mut self, receiver: mpsc::Receiver<LedgerWorkerEvent>, shutdown: oneshot::Receiver<()>) {
-        info!("[LedgerWorker ] Running.");
+        info!("Running.");
 
         let mut receiver_fused = receiver.fuse();
         let mut shutdown_fused = shutdown.fuse();
@@ -78,7 +78,7 @@ impl LedgerWorker {
             }
         }
 
-        info!("[LedgerWorker ] Stopped.");
+        info!("Stopped.");
     }
 }
 
@@ -125,7 +125,7 @@ mod tests {
             state.insert(rand_trits_field::<Address>(), rng.gen_range(0, 100_000_000));
         }
 
-        spawn(LedgerWorker::new(state.clone()).run(rx, shutdown_rx));
+        spawn(LedgerWorker::new(state).run(rx, shutdown_rx));
 
         for _ in 0..100 {
             let (get_balance_tx, get_balance_rx) = oneshot::channel();

@@ -13,7 +13,6 @@ use crate::{r#static::config::StaticPeeringConfig, PeerManager};
 
 use bee_network::{Command::AddEndpoint, Network, Url};
 
-use async_std::task::block_on;
 use async_trait::async_trait;
 use log::warn;
 
@@ -31,15 +30,14 @@ impl StaticPeerManager {
     }
 
     async fn add_endpoint(&mut self, url: &str) {
-        // TODO block ?
-        match block_on(Url::from_url_str(url)) {
+        match Url::from_url_str(url).await {
             Ok(url) => {
                 if let Err(e) = self.network.send(AddEndpoint { url, responder: None }).await {
-                    warn!("[StaticPeerManager ] Failed to add endpoint \"{}\": {}", url, e);
+                    warn!("Failed to add endpoint \"{}\": {}", url, e);
                 }
             }
             Err(e) => {
-                warn!("[StaticPeerManager ] Failed to resolve URL \"{}\": {}", url, e);
+                warn!("Failed to resolve URL \"{}\": {}", url, e);
             }
         }
     }

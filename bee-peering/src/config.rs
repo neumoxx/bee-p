@@ -23,13 +23,20 @@ impl PeeringConfigBuilder {
         Self::default()
     }
 
-    pub fn build(self) -> PeeringConfig {
+    pub fn finish(self) -> PeeringConfig {
         PeeringConfig {
-            r#static: self.r#static.build(),
+            r#static: self.r#static.finish(),
         }
     }
 }
 
+#[derive(Clone)]
 pub struct PeeringConfig {
     pub r#static: StaticPeeringConfig,
+}
+
+impl PeeringConfig {
+    pub fn build() -> PeeringConfigBuilder {
+        PeeringConfigBuilder::new()
+    }
 }

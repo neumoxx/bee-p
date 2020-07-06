@@ -12,7 +12,7 @@
 // TODO get peer info
 
 use crate::{
-    message::{Heartbeat, MilestoneRequest, TransactionBroadcast, TransactionRequest},
+    message::{Heartbeat, MilestoneRequest, Transaction as TransactionMessage, TransactionRequest},
     peer::{HandshakedPeer, Peer},
     protocol::Protocol,
     worker::SenderWorker,
@@ -22,7 +22,7 @@ use bee_network::{Address, EndpointId, Network};
 
 use std::sync::{Arc, Mutex};
 
-use async_std::task::spawn;
+use async_std::{sync::RwLock, task::spawn};
 use dashmap::DashMap;
 use futures::channel::{mpsc, oneshot};
 use log::warn;
@@ -31,6 +31,7 @@ pub(crate) struct PeerManager {
     network: Network,
     pub(crate) peers: DashMap<EndpointId, Arc<Peer>>,
     pub(crate) handshaked_peers: DashMap<EndpointId, Arc<HandshakedPeer>>,
+    pub(crate) handshaked_peers_keys: RwLock<Vec<EndpointId>>,
 }
 
 impl PeerManager {
@@ -39,6 +40,7 @@ impl PeerManager {
             network,
             peers: Default::default(),
             handshaked_peers: Default::default(),
+            handshaked_peers_keys: Default::default(),
         }
     }
 
@@ -46,8 +48,8 @@ impl PeerManager {
         self.peers.insert(peer.epid, peer);
     }
 
-    pub(crate) fn handshake(&self, epid: &EndpointId, address: Address) {
-        if let Some(_) = self.peers.remove(epid) {
+    pub(crate) async fn handshake(&self, epid: &EndpointId, address: Address) {
+        if self.peers.remove(epid).is_some() {
             // TODO check if not already added
 
             // SenderWorker MilestoneRequest
@@ -55,10 +57,10 @@ impl PeerManager {
                 mpsc::channel(Protocol::get().config.workers.milestone_request_send_worker_bound);
             let (milestone_request_shutdown_tx, milestone_request_shutdown_rx) = oneshot::channel();
 
-            // SenderWorker TransactionBroadcast
-            let (transaction_broadcast_tx, transaction_broadcast_rx) =
-                mpsc::channel(Protocol::get().config.workers.transaction_broadcast_send_worker_bound);
-            let (transaction_broadcast_shutdown_tx, transaction_broadcast_shutdown_rx) = oneshot::channel();
+            // SenderWorker TransactionMessage
+            let (transaction_tx, transaction_rx) =
+                mpsc::channel(Protocol::get().config.workers.transaction_send_worker_bound);
+            let (transaction_shutdown_tx, transaction_shutdown_rx) = oneshot::channel();
 
             // SenderWorker TransactionRequest
             let (transaction_request_tx, transaction_request_rx) =
@@ -74,10 +76,7 @@ impl PeerManager {
                 *epid,
                 address,
                 (milestone_request_tx, Mutex::new(Some(milestone_request_shutdown_tx))),
-                (
-                    transaction_broadcast_tx,
-                    Mutex::new(Some(transaction_broadcast_shutdown_tx)),
-                ),
+                (transaction_tx, Mutex::new(Some(transaction_shutdown_tx))),
                 (
                     transaction_request_tx,
                     Mutex::new(Some(transaction_request_shutdown_tx)),
@@ -86,35 +85,35 @@ impl PeerManager {
             ));
 
             self.handshaked_peers.insert(*epid, peer.clone());
+            self.handshaked_peers_keys.write().await.push(*epid);
 
             spawn(
                 SenderWorker::<MilestoneRequest>::new(self.network.clone(), peer.clone())
                     .run(milestone_request_rx, milestone_request_shutdown_rx),
             );
             spawn(
-                SenderWorker::<TransactionBroadcast>::new(self.network.clone(), peer.clone())
-                    .run(transaction_broadcast_rx, transaction_broadcast_shutdown_rx),
+                SenderWorker::<TransactionMessage>::new(self.network.clone(), peer.clone())
+                    .run(transaction_rx, transaction_shutdown_rx),
             );
             spawn(
                 SenderWorker::<TransactionRequest>::new(self.network.clone(), peer.clone())
                     .run(transaction_request_rx, transaction_request_shutdown_rx),
             );
-            spawn(
-                SenderWorker::<Heartbeat>::new(self.network.clone(), peer.clone())
-                    .run(heartbeat_rx, heartbeat_shutdown_rx),
-            );
+            spawn(SenderWorker::<Heartbeat>::new(self.network.clone(), peer).run(heartbeat_rx, heartbeat_shutdown_rx));
         }
     }
 
-    pub(crate) fn remove(&self, epid: &EndpointId) {
+    pub(crate) async fn remove(&self, epid: &EndpointId) {
         // TODO both ?
         self.peers.remove(epid);
+
+        self.handshaked_peers_keys.write().await.retain(|e| e != epid);
 
         if let Some((_, peer)) = self.handshaked_peers.remove(epid) {
             if let Ok(mut shutdown) = peer.milestone_request.1.lock() {
                 if let Some(shutdown) = shutdown.take() {
                     if let Err(e) = shutdown.send(()) {
-                        warn!("[Protocol ] Shutting down TransactionWorker failed: {:?}.", e);
+                        warn!("Shutting down TransactionWorker failed: {:?}.", e);
                     }
                 }
             }
@@ -123,16 +122,16 @@ impl PeerManager {
         // TODO
 
         // if let Err(_) = peer.milestone_request.1.send(()) {
-        //     warn!("[Protocol ] Shutting down MilestoneRequest SenderWorker failed.");
+        //     warn!("Shutting down MilestoneRequest SenderWorker failed.");
         // }
-        // if let Err(_) = peer.transaction_broadcast.1.send(()) {
-        //     warn!("[Protocol ] Shutting down TransactionBroadcast SenderWorker failed.");
+        // if let Err(_) = peer.transaction.1.send(()) {
+        //     warn!("Shutting down TransactionMessage SenderWorker failed.");
         // }
         // if let Err(_) = peer.transaction_request.1.send(()) {
-        //     warn!("[Protocol ] Shutting down TransactionRequest SenderWorker failed.");
+        //     warn!("Shutting down TransactionRequest SenderWorker failed.");
         // }
         // if let Err(_) = peer.heartbeat.1.send(()) {
-        //     warn!("[Protocol ] Shutting down Heartbeat SenderWorker failed.");
+        //     warn!("Shutting down Heartbeat SenderWorker failed.");
         // }
     }
 }

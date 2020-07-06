@@ -12,12 +12,12 @@
 use crate::{
     milestone::{Milestone, MilestoneBuilder, MilestoneBuilderError},
     protocol::Protocol,
+    tangle::tangle,
 };
 
-use bee_bundle::Hash;
-use bee_crypto::{Kerl, Sponge};
-use bee_signing::{PublicKey, RecoverableSignature};
-use bee_tangle::tangle;
+use bee_crypto::ternary::{Hash, Kerl, Sponge};
+use bee_signing::ternary::{PublicKey, RecoverableSignature};
+use bee_transaction::TransactionVertex;
 
 use std::marker::PhantomData;
 
@@ -61,11 +61,12 @@ where
         // TODO also do an IncomingBundleBuilder check ?
         let mut builder = MilestoneBuilder::<Kerl, M, P>::new(tail_hash);
         let mut transaction = tangle()
-            .get_transaction(&tail_hash)
+            .get(&tail_hash)
             .ok_or(MilestoneValidatorWorkerError::UnknownTail)?;
 
+        // TODO consider using the metadata instead as it might be more efficient
         if !transaction.is_tail() {
-            Err(MilestoneValidatorWorkerError::NotATail)?;
+            return Err(MilestoneValidatorWorkerError::NotATail);
         }
 
         builder.push((*transaction).clone());
@@ -73,7 +74,7 @@ where
         // TODO use walker
         for _ in 0..Protocol::get().config.coordinator.security_level {
             transaction = tangle()
-                .get_transaction(transaction.trunk())
+                .get((*transaction).trunk())
                 .ok_or(MilestoneValidatorWorkerError::IncompleteBundle)?;
 
             builder.push((*transaction).clone());
@@ -82,8 +83,34 @@ where
         Ok(builder
             .depth(Protocol::get().config.coordinator.depth)
             .validate()
-            .map_err(|e| MilestoneValidatorWorkerError::InvalidMilestone(e))?
+            .map_err(MilestoneValidatorWorkerError::InvalidMilestone)?
             .build())
+    }
+
+    async fn process(&self, tail_hash: Hash) {
+        // TODO split
+        match self.validate_milestone(tail_hash).await {
+            Ok(milestone) => {
+                // TODO check multiple triggers
+                tangle().add_milestone(milestone.index.into(), milestone.hash);
+                let mut metadata = tangle().get_metadata(&milestone.hash).unwrap();
+                metadata.flags.set_milestone();
+                tangle().set_metadata(&milestone.hash, metadata);
+
+                // TODO deref ? Why not .into() ?
+                if milestone.index > tangle().get_last_milestone_index() {
+                    info!("New milestone #{}.", *milestone.index);
+                    tangle().update_last_milestone_index(milestone.index.into());
+                }
+                // TODO only trigger if index == last solid index ?
+                // TODO trigger only if requester is empty ? And unsynced ?
+                // Protocol::trigger_transaction_solidification(milestone.hash).await;
+            }
+            Err(e) => match e {
+                MilestoneValidatorWorkerError::IncompleteBundle => {}
+                _ => debug!("Invalid milestone bundle: {:?}.", e),
+            },
+        }
     }
 
     // TODO PriorityQueue ?
@@ -92,7 +119,7 @@ where
         receiver: mpsc::Receiver<MilestoneValidatorWorkerEvent>,
         shutdown: oneshot::Receiver<()>,
     ) {
-        info!("[MilestoneValidatorWorker ] Running.");
+        info!("Running.");
 
         let mut receiver_fused = receiver.fuse();
         let mut shutdown_fused = shutdown.fuse();
@@ -101,27 +128,7 @@ where
             select! {
                 tail_hash = receiver_fused.next() => {
                     if let Some(tail_hash) = tail_hash {
-                        // TODO split
-                        match self.validate_milestone(tail_hash).await {
-                            Ok(milestone) => {
-                                // TODO check multiple triggers
-                                tangle().add_milestone(milestone.index.into(), milestone.hash);
-                                // TODO deref ? Why not .into() ?
-                                if milestone.index > *tangle().get_last_milestone_index() {
-                                    info!("[MilestoneValidatorWorker ] New milestone #{}.", milestone.index);
-                                    tangle().update_last_milestone_index(milestone.index.into());
-                                }
-                                // TODO only trigger if index == last solid index ?
-                                // TODO trigger only if requester is empty ? And unsynced ?
-                                // Protocol::trigger_transaction_solidification(milestone.hash).await;
-                            },
-                            Err(e) => {
-                                match e {
-                                    MilestoneValidatorWorkerError::IncompleteBundle => {},
-                                    _ => debug!("[MilestoneValidatorWorker ] Invalid milestone bundle: {:?}.", e)
-                                }
-                            }
-                        }
+                        self.process(tail_hash).await;
                     }
                 },
                 _ = shutdown_fused => {
@@ -130,7 +137,7 @@ where
             }
         }
 
-        info!("[MilestoneValidatorWorker ] Stopped.");
+        info!("Stopped.");
     }
 }
 

@@ -9,78 +9,49 @@
 // an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and limitations under the License.
 
-use bee_bundle::{Address, TransactionField};
-use bee_ternary::{T1B1Buf, TryteBuf};
+use bee_transaction::bundled::Address;
 
-use std::{
-    collections::HashMap,
-    fs::File,
-    io::{BufRead, BufReader},
-};
+use std::collections::HashMap;
 
-// TODO export ?
-pub const IOTA_SUPPLY: u64 = 2_779_530_283_277_761;
+// TODO Abstract balances
 
-#[derive(Debug)]
-pub enum SnapshotStateError {
-    IOError(std::io::Error),
-    InvalidAddress,
-    InvalidBalance(std::num::ParseIntError),
-    InvalidSupply(u64, u64),
-}
-
+#[derive(Default)]
 pub struct SnapshotState {
-    state: HashMap<Address, u64>,
+    pub(crate) balances: HashMap<Address, u64>,
 }
 
 impl SnapshotState {
-    pub fn new(path: &str) -> Result<Self, SnapshotStateError> {
-        match File::open(path) {
-            Ok(file) => {
-                let reader = BufReader::new(file);
-                let mut supply: u64 = 0;
-                // TODO any possibility to reserve ?
-                let mut state = HashMap::new();
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-                for line in reader.lines() {
-                    match line {
-                        Ok(line) => {
-                            let tokens: Vec<&str> = line.split(";").collect();
-                            // TODO check size of tokens
-
-                            let hash = match TryteBuf::try_from_str(&tokens[0][..tokens[0].len()]) {
-                                Ok(buf) => Address::try_from_inner(buf.as_trits().encode::<T1B1Buf>())
-                                    .map_err(|_| SnapshotStateError::InvalidAddress),
-                                Err(_) => Err(SnapshotStateError::InvalidAddress),
-                            }?;
-
-                            let balance = tokens[1][..tokens[1].len()]
-                                .parse::<u64>()
-                                .map_err(|e| SnapshotStateError::InvalidBalance(e))?;
-
-                            state.insert(hash, balance);
-
-                            supply += balance;
-                        }
-                        Err(e) => return Err(SnapshotStateError::IOError(e)),
-                    }
-                }
-
-                if supply != IOTA_SUPPLY {
-                    return Err(SnapshotStateError::InvalidSupply(supply, IOTA_SUPPLY));
-                }
-
-                Ok(Self { state })
-            }
-            Err(e) => Err(SnapshotStateError::IOError(e)),
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            balances: HashMap::with_capacity(capacity),
         }
     }
 
-    pub fn state(&self) -> &HashMap<Address, u64> {
-        &self.state
+    pub fn insert(&mut self, address: Address, balance: u64) -> Option<u64> {
+        self.balances.insert(address, balance)
     }
 
-    pub fn into_state(self) -> HashMap<Address, u64> {
-        self.state
+    pub fn remove(&mut self, address: &Address) -> Option<u64> {
+        self.balances.remove(address)
+    }
+
+    pub fn get(&self, address: &Address) -> Option<&u64> {
+        self.balances.get(address)
+    }
+
+    pub fn len(&self) -> usize {
+        self.balances.len()
+    }
+
+    pub fn balances(&self) -> &HashMap<Address, u64> {
+        &self.balances
+    }
+
+    pub fn into_balances(self) -> HashMap<Address, u64> {
+        self.balances
     }
 }
