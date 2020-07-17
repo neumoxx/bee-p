@@ -13,7 +13,7 @@ use bee_common::{shutdown::Shutdown, worker::Error as WorkerError};
 use bee_event::Bus;
 use bee_protocol::events::{LastMilestone, LastSolidMilestone};
 
-use async_std::task::{block_on, spawn};
+use async_std::task::spawn;
 use futures::{
     channel::{mpsc, oneshot},
     future::FutureExt,
@@ -74,11 +74,11 @@ async fn lsmi_worker(
 }
 
 fn lmi_listener(last_milestone: &LastMilestone) {
-    mqtt().lmi.unbounded_send(last_milestone.clone()).unwrap();
+    mqtt().lmi.unbounded_send(last_milestone.clone());
 }
 
 fn lsmi_listener(last_solid_milestone: &LastSolidMilestone) {
-    mqtt().lsmi.unbounded_send(last_solid_milestone.clone()).unwrap();
+    mqtt().lsmi.unbounded_send(last_solid_milestone.clone());
 }
 
 pub fn init(bus: Arc<Bus<'static>>, shutdown: &mut Shutdown) {
