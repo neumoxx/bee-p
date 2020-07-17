@@ -16,10 +16,12 @@ use errors::*;
 
 use async_std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 
+use bee_common_derive::{SecretDebug, SecretDisplay};
+
 use std::{fmt, ops};
 
 /// A wrapper around a `u16` describing a network port number to increase type safety.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, SecretDebug, SecretDisplay, Eq, PartialEq)]
 pub struct Port(pub u16);
 
 impl ops::Deref for Port {

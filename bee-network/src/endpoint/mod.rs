@@ -20,10 +20,12 @@ use crate::address::{
     Address,
 };
 
+use bee_common_derive::{SecretDebug, SecretDisplay};
+
 use std::fmt;
 
 /// The id of an `Endpoint`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, SecretDebug, SecretDisplay, Eq, Hash, PartialEq)]
 pub struct EndpointId {
     inner: Address,
 }
@@ -39,12 +41,6 @@ impl From<Url> for EndpointId {
         match url {
             Url::Tcp(socket_addr) | Url::Udp(socket_addr) => Self { inner: socket_addr },
         }
-    }
-}
-
-impl fmt::Display for EndpointId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.inner)
     }
 }
 
