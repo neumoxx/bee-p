@@ -6,6 +6,7 @@ members = [
 	"bee-event/bee-event",
 	"bee-event/bee-event-derive",
 	"bee-ledger",
+	"bee-mqtt",
 	"bee-network",
 	"bee-node",
 	"bee-peering",
