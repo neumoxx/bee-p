@@ -69,6 +69,9 @@ impl NodeBuilder {
         info!("Initializing tangle...");
         tangle::init();
 
+        info!("Initializing MQTT...");
+        bee_mqtt::init(bus.clone(), &mut shutdown);
+
         info!("Starting static peer manager...");
         spawn(StaticPeerManager::new(self.config.peering.r#static.clone(), network.clone()).run());
 

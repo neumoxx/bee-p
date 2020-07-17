@@ -14,3 +14,7 @@ homepage = "https://www.iota.org"
 bee-common = { git = "https://github.com/iotaledger/bee.git" }
 bee-event = { path = "../bee-event/bee-event" }
 bee-protocol = { path = "../bee-protocol" }
+
+async-std = "1.6.2"
+futures = "0.3.5"
+rumqtt = "0.31.0"
