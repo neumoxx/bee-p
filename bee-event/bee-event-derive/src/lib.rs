@@ -12,36 +12,21 @@
 //! Derive macros for the bee-event crate.
 
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, Lit, Meta};
+use syn::{parse_macro_input, DeriveInput};
 
-#[proc_macro_derive(Event, attributes(name))]
+#[proc_macro_derive(Event)]
 pub fn derive_event(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // Parse the input tokens into a syntax tree.
     let input = parse_macro_input!(input as DeriveInput);
 
-    if input.attrs.len() != 1 {
-        panic!("Invalid attributes number, derive_event requires one attribute.");
-    }
-
     // Used in the quasi-quotation below as `#name`.
     let name = input.ident;
-
-    let event_name = match input.attrs.get(0) {
-        Some(name) => match name.parse_meta() {
-            Ok(Meta::NameValue(meta)) => match &meta.lit {
-                Lit::Str(lit) => lit.value(),
-                _ => panic!("\"name\" attribute must be a string."),
-            },
-            _ => panic!("Expected argument `name = \"...\"`"),
-        },
-        None => unreachable!(),
-    };
 
     // The generated implementation.
     let expanded = quote! {
         impl bee_event::Event for #name {
             fn name() -> &'static str {
-                #event_name
+                stringify!(#name)
             }
 
             fn interned_static() -> &'static std::thread::LocalKey<bee_event::EventNameCache> {
