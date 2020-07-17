@@ -14,15 +14,55 @@ use bee_event::Bus;
 use bee_protocol::events::{LastMilestone, LastSolidMilestone};
 
 use async_std::task::{block_on, spawn};
-use futures::channel::{mpsc, oneshot};
+use futures::{
+    channel::{mpsc, oneshot},
+    future::FutureExt,
+    select,
+    stream::StreamExt,
+};
 use rumqtt::{MqttClient, MqttOptions, QoS};
 
-use std::{sync::Arc, thread, time::Duration};
+use std::{ptr, sync::Arc};
+
+static mut MQTT: *const Mqtt = ptr::null();
+
+struct Mqtt {
+    lmi: mpsc::UnboundedSender<LastMilestone>,
+    lsmi: mpsc::UnboundedSender<LastSolidMilestone>,
+}
+
+fn mqtt() -> &'static Mqtt {
+    if unsafe { MQTT.is_null() } {
+        panic!("Uninitialized mqtt.");
+    } else {
+        unsafe { &*MQTT }
+    }
+}
 
 async fn lmi_worker(
     receiver: mpsc::UnboundedReceiver<LastMilestone>,
     shutdown: oneshot::Receiver<()>,
 ) -> Result<(), WorkerError> {
+    let mut receiver_fused = receiver.fuse();
+    let mut shutdown_fused = shutdown.fuse();
+
+    let mqtt_options = MqttOptions::new("bee-lmi", "localhost", 1883);
+    let (mut mqtt_client, _) = MqttClient::start(mqtt_options).unwrap();
+
+    loop {
+        select! {
+            event = receiver_fused.next() => {
+                if let Some(LastMilestone(milestone)) = event {
+                    let payload = format!("{}", *milestone.index());
+                    mqtt_client.publish("lmi", QoS::AtLeastOnce, false, payload).unwrap();
+                }
+            },
+            _ = shutdown_fused => {
+                break;
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -34,33 +74,35 @@ async fn lsmi_worker(
 }
 
 fn lmi_listener(last_milestone: &LastMilestone) {
-    println!("lmi: {:?}", last_milestone.0.index());
+    mqtt().lmi.unbounded_send(last_milestone.clone()).unwrap();
 }
 
 fn lsmi_listener(last_solid_milestone: &LastSolidMilestone) {
-    println!("lsmi: {:?}", last_solid_milestone.0.index());
+    mqtt().lsmi.unbounded_send(last_solid_milestone.clone()).unwrap();
 }
 
 pub fn init(bus: Arc<Bus<'static>>, shutdown: &mut Shutdown) {
+    if unsafe { !MQTT.is_null() } {
+        panic!("Already initialized.");
+    }
+
     let (lmi_tx, lmi_rx) = mpsc::unbounded();
     let (lmi_shutdown_tx, lmi_shutdown_rx) = oneshot::channel();
     shutdown.add_worker_shutdown(lmi_shutdown_tx, spawn(lmi_worker(lmi_rx, lmi_shutdown_rx)));
-    bus.add_listener(lmi_listener);
 
     let (lsmi_tx, lsmi_rx) = mpsc::unbounded();
     let (lsmi_shutdown_tx, lsmi_shutdown_rx) = oneshot::channel();
     shutdown.add_worker_shutdown(lsmi_shutdown_tx, spawn(lsmi_worker(lsmi_rx, lsmi_shutdown_rx)));
-    bus.add_listener(lsmi_listener);
 
-    // let mqtt_options = MqttOptions::new("test-pubsub1", "localhost", 1883);
-    // let (mut mqtt_client, _) = MqttClient::start(mqtt_options).unwrap();
-    //
-    // let sleep_time = Duration::from_secs(1);
-    // thread::spawn(move || {
-    //     for i in 0..100 {
-    //         let payload = format!("publish {}", i);
-    //         thread::sleep(sleep_time);
-    //         mqtt_client.publish("bee", QoS::AtLeastOnce, false, payload).unwrap();
-    //     }
-    // });
+    let mqtt = Mqtt {
+        lmi: lmi_tx,
+        lsmi: lsmi_tx,
+    };
+
+    unsafe {
+        MQTT = Box::leak(mqtt.into()) as *const _;
+    }
+
+    bus.add_listener(lmi_listener);
+    bus.add_listener(lsmi_listener);
 }
