@@ -20,6 +20,7 @@ bee-peering = { path = "../bee-peering" }
 bee-protocol = { path = "../bee-protocol" }
 bee-snapshot = { path = "../bee-snapshot" }
 bee-transaction = { path = "../bee-transaction" }
+bee-dashboard = { path = "../bee-dashboard" }
 
 async-std = "1.6.2"
 futures = "0.3.5"

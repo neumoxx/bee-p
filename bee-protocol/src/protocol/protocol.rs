@@ -50,7 +50,7 @@ pub struct Protocol {
     // TODO temporary
     pub(crate) local_snapshot_timestamp: u64,
     pub(crate) bus: Arc<Bus<'static>>,
-    pub(crate) metrics: ProtocolMetrics,
+    pub metrics: ProtocolMetrics,
     pub(crate) hasher_worker: mpsc::UnboundedSender<HasherWorkerEvent>,
     pub(crate) transaction_responder_worker: mpsc::UnboundedSender<TransactionResponderWorkerEvent>,
     pub(crate) milestone_responder_worker: mpsc::UnboundedSender<MilestoneResponderWorkerEvent>,
@@ -287,7 +287,7 @@ impl Protocol {
         );
     }
 
-    pub(crate) fn get() -> &'static Protocol {
+    pub fn get() -> &'static Protocol {
         if unsafe { PROTOCOL.is_null() } {
             panic!("Uninitialized protocol.");
         } else {

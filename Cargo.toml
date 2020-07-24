@@ -2,6 +2,7 @@
 members = [
 	"bee-api",
 	"bee-common-ext",
+	"bee-dashboard",
 	"bee-ledger",
 	"bee-network",
 	"bee-node",
