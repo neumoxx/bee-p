@@ -67,10 +67,6 @@ impl NodeBuilder {
 
         bee_snapshot::init(&self.config.snapshot, bus.clone(), &mut shutdown);
 
-        info!("Initializing dashboard...");
-        bee_dashboard::websocket::spawn_workers(&mut shutdown);
-        bee_dashboard::websocket::init();
-
         let local_snapshot = match LocalSnapshot::from_file(self.config.snapshot.local().path()) {
             Ok(local_snapshot) => {
                 tangle::tangle().update_latest_solid_milestone_index(local_snapshot.metadata().index().into());
