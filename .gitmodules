@@ -1,0 +1,3 @@
+[submodule "bee-dashboard/node-dashboard"]
+	path = bee-dashboard/node-dashboard
+	url = https://github.com/iotaledger/node-dashboard
