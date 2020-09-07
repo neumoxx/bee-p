@@ -28,8 +28,7 @@ mime_guess =  "2"
 tokio = { version = "0.2.11", features = ["sync"] }
 clap = "2.32.0"
 url = "2.0"
-bee-common = { git = "https://github.com/iotaledger/bee.git" }
-bee-protocol = { path = "../bee-protocol" }
+bee-common = { git = "https://github.com/iotaledger/bee.git", branch = "dev" }
 log = "0.4.8"
 async-std = "1.6.2"
 

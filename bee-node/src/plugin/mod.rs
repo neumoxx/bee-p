@@ -14,6 +14,7 @@ use bee_common_ext::{event::Bus, shutdown_tokio::Shutdown};
 use std::sync::Arc;
 
 mod tps;
+mod dashboard;
 
 pub trait Plugin {
     type Error;
@@ -24,5 +25,6 @@ pub trait Plugin {
 }
 
 pub(crate) fn init(bus: Arc<Bus>, shutdown: &mut Shutdown) {
-    tps::TpsPlugin::new().init(bus, shutdown);
+    tps::TpsPlugin::new().init(bus.clone(), shutdown);
+    dashboard::DashboardPlugin::new().init(bus, shutdown);
 }
