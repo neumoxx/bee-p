@@ -5,10 +5,13 @@ use actix::prelude::*;
 use chrono::Local;
 use serde_json::json;
 use bee_common::shutdown::Shutdown;
-use std::sync::mpsc;
-use std::thread;
-use async_std::task::spawn;
-use futures::channel::oneshot;
+use futures::{
+    channel::{mpsc, oneshot},
+};
+use std::sync::mpsc as sync_mpsc;
+use std::{ptr, thread, iter::Iterator};
+use async_std::task::{block_on, spawn};
+use log::{info, warn};
 use crate::controller::static_files;
 
 /// How often heartbeat pings are sent
@@ -16,22 +19,24 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 /// How long before lack of client response causes a timeout
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(20);
 
-pub const STATUS: u8 = 0;
-pub const TPS_METRICS: u8 = 1;
-pub const TIP_SEL_METRIC: u8 = 2;
-pub const TX: u8 = 3;
-pub const MS: u8 = 4;
-pub const PEER_METRIC: u8 = 5;
-pub const CONFIRMED_MS_METRICS: u8 = 6;
-pub const VERTEX: u8 = 7;
-pub const SOLID_INFO: u8 = 8;
-pub const CONFIRMED_INFO: u8 = 9;
-pub const MILESTONE_INFO: u8 = 10;
-pub const TIP_INFO: u8 = 11;
-pub const DB_SIZE_METRIC: u8 = 12;
-pub const DB_CLEANUP: u8 = 13;
-pub const SPAM_METRICS: u8 = 14;
-pub const AVG_SPAM_METRICS: u8 = 15;
+pub const SYNC_STATUS: u8 = 0;
+pub const STATUS: u8 = 1;
+pub const TPS_METRICS: u8 = 2;
+pub const TIP_SEL_METRIC: u8 = 3;
+pub const TX_ZERO_VALUE: u8 = 4;
+pub const TX_VALUE: u8 = 4;
+pub const MS: u8 = 5;
+pub const PEER_METRIC: u8 = 6;
+pub const CONFIRMED_MS_METRICS: u8 = 7;
+pub const VERTEX: u8 = 8;
+pub const SOLID_INFO: u8 = 9;
+pub const CONFIRMED_INFO: u8 = 10;
+pub const MILESTONE_INFO: u8 = 11;
+pub const TIP_INFO: u8 = 12;
+pub const DB_SIZE_METRIC: u8 = 13;
+pub const DB_CLEANUP: u8 = 14;
+pub const SPAM_METRICS: u8 = 15;
+pub const AVG_SPAM_METRICS: u8 = 16;
 
 static mut LISTENERS: Vec<Addr<DashboardWebSocket>> = vec![];
 
@@ -39,9 +44,69 @@ pub unsafe fn get_listeners() -> &'static Vec<Addr<DashboardWebSocket>>{
     &LISTENERS
 }
 
+static mut DASHBOARD: *const Dashboard = ptr::null();
+
+pub struct Dashboard {
+    //pub tps_worker: mpsc::Sender<super::tps::TpsWorkerEvent>,
+    //pub livefeed_worker: mpsc::Sender<super::livefeed::LivefeedWorkerEvent>,
+}
+
+impl Dashboard {
+    pub async fn init(shutdown: &mut Shutdown) {
+        if unsafe { !DASHBOARD.is_null() } {
+            warn!("Already initialized.");
+            return;
+        }
+/*
+        let (dbsize_worker_shutdown_tx, dbsize_worker_shutdown_rx) = oneshot::channel();
+    
+        shutdown.add_worker_shutdown(
+            dbsize_worker_shutdown_tx,
+            spawn(unsafe{super::dbsize::DBSizeWorker::new().run(dbsize_worker_shutdown_rx)}),
+        );
+    
+    
+        let (tps_worker_tx, tps_worker_rx) = mpsc::channel(1000);
+        let (tps_worker_shutdown_tx, tps_worker_shutdown_rx) = oneshot::channel();
+    
+        shutdown.add_worker_shutdown(
+            tps_worker_shutdown_tx,
+            spawn(unsafe{super::tps::TpsWorker::new().run(tps_worker_rx, tps_worker_shutdown_rx)}),
+        );
+
+        let (livefeed_worker_tx, livefeed_worker_rx) = mpsc::channel(1000);
+        let (livefeed_worker_shutdown_tx, livefeed_worker_shutdown_rx) = oneshot::channel();
+    
+
+        shutdown.add_worker_shutdown(
+            livefeed_worker_shutdown_tx,
+            spawn(unsafe{super::livefeed::LivefeedWorker::new().run(
+                livefeed_worker_rx,
+                livefeed_worker_shutdown_rx,
+            )}),
+        );
+*/
+        let dashboard = Dashboard {
+            //tps_worker: tps_worker_tx,
+            //livefeed_worker: livefeed_worker_tx,
+        };
+
+        unsafe {
+            DASHBOARD = Box::leak(dashboard.into()) as *const _;
+        }
+    }
+
+    pub fn get() -> &'static Dashboard {
+        if unsafe { DASHBOARD.is_null() } {
+            panic!("Uninitialized dashboard.");
+        } else {
+            unsafe { &*DASHBOARD }
+        }
+    }
+}
+
 /// do websocket handshake and start `DashboardSocket` actor
 pub async fn ws_index(r: HttpRequest, stream: web::Payload, data: web::Data<Addr<ServerMonitor>>) -> Result<HttpResponse, Error> {
-    println!("ws_index {}", "hola");
     println!("{:?}", r);
     let (addr, res) = ws::start_with_addr(DashboardWebSocket::new(), &r, stream)?;
     unsafe {
@@ -132,7 +197,6 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for DashboardWebSocke
         ctx: &mut Self::Context,
     ) {
         // process websocket messages
-        println!("WS: {:?}", msg);
         match msg {
             Ok(ws::Message::Ping(msg)) => {
                 self.hb = Instant::now();
@@ -141,8 +205,14 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for DashboardWebSocke
             Ok(ws::Message::Pong(_)) => {
                 self.hb = Instant::now();
             }
-            Ok(ws::Message::Text(text)) => ctx.text(text),
-            Ok(ws::Message::Binary(bin)) => ctx.binary(bin),
+            Ok(ws::Message::Text(text)) => {
+                println!("WS: {:?}", text);
+                ctx.text(text)
+            },
+            Ok(ws::Message::Binary(bin)) => {
+                println!("WS: {:?}", bin);
+                ctx.binary(bin)
+            },
             Ok(ws::Message::Close(reason)) => {
                 ctx.close(reason);
                 ctx.stop();
@@ -160,26 +230,18 @@ impl Handler<ServerEvent> for DashboardWebSocket {
     }
 }
 
-pub fn spawn_workers(shutdown: &mut Shutdown) -> (){
-    let (dbsize_worker_shutdown_tx, dbsize_worker_shutdown_rx) = oneshot::channel();
+pub fn init(shutdown: &mut Shutdown) -> (){
 
-    shutdown.add_worker_shutdown(
-        dbsize_worker_shutdown_tx,
-        spawn(unsafe{super::dbsize::DBSizeWorker::new().run(dbsize_worker_shutdown_rx)}),
-    );
+    block_on(Dashboard::init(shutdown));
 
-    let (tps_worker_shutdown_tx, tps_worker_shutdown_rx) = oneshot::channel();
+    init_actix();
 
-    shutdown.add_worker_shutdown(
-        tps_worker_shutdown_tx,
-        spawn(unsafe{super::tps::TpsWorker::new().run(tps_worker_shutdown_rx)}),
-    );
 }
 
 #[actix_rt::main]
-pub async fn init() -> std::io::Result<()> {
+pub async fn init_actix() -> std::io::Result<()> {
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = sync_mpsc::channel();
 
     println!("url: {}", "hey");
 
