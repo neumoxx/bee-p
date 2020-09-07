@@ -5,7 +5,7 @@ use rust_embed::RustEmbed;
 use std::borrow::Cow;
 
 #[derive(RustEmbed)]
-#[folder = "frontend/build/"]
+#[folder = "node-dashboard/build/"]
 struct UIAsset;
 
 fn handle_static_file<E: RustEmbed>(path: &str) -> HttpResponse {
