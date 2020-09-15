@@ -13,22 +13,15 @@ use crate::plugin::Plugin;
 
 use bee_common::shutdown::Shutdown;
 use bee_common_ext::event::Bus;
-use bee_protocol::event::{
-    TpsMetricsUpdated,
-    LastMilestoneChanged,
-    LastSolidMilestoneChanged,
-    //NewTransaction
-};
-use chrono::Local;
+use bee_protocol::event::{LatestMilestoneChanged, LatestSolidMilestoneChanged, TpsMetricsUpdated};
 use serde_json::json;
 
-use std::{convert::Infallible, sync::Arc};
+use std::{convert::Infallible, sync::Arc, time::Instant};
 
 fn tps(metrics: &TpsMetricsUpdated) {
+    let date = Instant::now();
 
-    let date = Local::now();
-
-    for l in unsafe{bee_dashboard::websocket::get_listeners()} {
+    for l in unsafe { bee_dashboard::websocket::get_listeners() } {
         let msg = json!({
             "type": bee_dashboard::websocket::TPS_METRICS,
             "data": {
@@ -38,28 +31,28 @@ fn tps(metrics: &TpsMetricsUpdated) {
                 "stale": metrics.stale,
                 "invalid": metrics.invalid,
                 "outgoing": metrics.outgoing,
-                "ts": (date.timestamp_millis()),
+                "ts": (date.elapsed().as_millis()),
             }
         });
-        l.do_send(bee_dashboard::websocket::ServerEvent{ event: String::from(msg.to_string()) });
+        l.do_send(bee_dashboard::websocket::ServerEvent {
+            event: String::from(msg.to_string()),
+        });
     }
 
     status_changed();
 }
 
 fn status_changed() {
-
-    let date = Local::now();
+    let date = Instant::now();
     let tangle = bee_protocol::tangle::tangle();
-    
-    for l in unsafe{bee_dashboard::websocket::get_listeners()} {
 
+    for l in unsafe { bee_dashboard::websocket::get_listeners() } {
         let msg = json!({
             "type": bee_dashboard::websocket::STATUS,
             "data": {
-                "lsmi": tangle.get_last_solid_milestone_index().0,
-                "lmi": tangle.get_last_milestone_index().0,
-                "snapshot_index": tangle.get_snapshot_milestone_index().0,
+                "lsmi": tangle.get_latest_solid_milestone_index().0,
+                "lmi": tangle.get_latest_milestone_index().0,
+                "snapshot_index": tangle.get_snapshot_index().0,
                 "pruning_index": 666,
                 "is_healthy": tangle.is_synced(),
                 "version": "1.2",
@@ -74,7 +67,7 @@ fn status_changed() {
                 "request_queue_pending": 6,
                 "request_queue_processing": 7,
                 "request_queue_avg_latency": 8,
-                "ts": date.timestamp_millis(),
+                "ts": date.elapsed().as_millis(),
                 "server_metrics": {
                     "NumberOfAllTransactions":        200,
                     "NumberOfNewTransactions":        190,
@@ -93,7 +86,7 @@ fn status_changed() {
                     "NumberOfSentSpamTxsCount":       60,
                     "NumberOfValidatedBundles":       50,
                     "NumberOfSeenSpentAddr":          40,
-                    "ts": date.timestamp_millis(),
+                    "ts": date.elapsed().as_millis(),
                 },
                 "mem": {
                     "Sys":          1000000,
@@ -107,7 +100,7 @@ fn status_changed() {
                     "StackSys":     800000,
                     "NumGC":        10,
                     "LastPauseGC":  200,
-                    "ts": date.timestamp_millis(),
+                    "ts": date.elapsed().as_millis(),
                 },
                 "caches": {
                     "Approvers": {
@@ -131,17 +124,18 @@ fn status_changed() {
                     "RefsInvalidBundle": {
                         "Size": 0,
                     },
-                    "ts": date.timestamp_millis(),
+                    "ts": date.elapsed().as_millis(),
                 }
             }
         });
-        l.do_send(bee_dashboard::websocket::ServerEvent{ event: String::from(msg.to_string()) });
+        l.do_send(bee_dashboard::websocket::ServerEvent {
+            event: String::from(msg.to_string()),
+        });
     }
-
 }
 
-fn last_milestone_changed(last_milestone: &LastMilestoneChanged) {
-    for l in unsafe{bee_dashboard::websocket::get_listeners()} {
+fn last_milestone_changed(last_milestone: &LatestMilestoneChanged) {
+    for l in unsafe { bee_dashboard::websocket::get_listeners() } {
         let msg = json!({
             "type": bee_dashboard::websocket::MS,
             "data": {
@@ -153,14 +147,16 @@ fn last_milestone_changed(last_milestone: &LastMilestoneChanged) {
                 "index": last_milestone.0.index().0,
             }
         });
-        l.do_send(bee_dashboard::websocket::ServerEvent{ event: String::from(msg.to_string()) });
+        l.do_send(bee_dashboard::websocket::ServerEvent {
+            event: String::from(msg.to_string()),
+        });
     }
 
     status_changed();
 }
 
-fn last_solid_milestone_changed(last_solid_milestone: &LastSolidMilestoneChanged) {
-    for l in unsafe{bee_dashboard::websocket::get_listeners()} {
+fn last_solid_milestone_changed(last_solid_milestone: &LatestSolidMilestoneChanged) {
+    for l in unsafe { bee_dashboard::websocket::get_listeners() } {
         let msg = json!({
             "type": bee_dashboard::websocket::MS,
             "data": {
@@ -172,30 +168,30 @@ fn last_solid_milestone_changed(last_solid_milestone: &LastSolidMilestoneChanged
                 "index": last_solid_milestone.0.index().0,
             }
         });
-        l.do_send(bee_dashboard::websocket::ServerEvent{ event: String::from(msg.to_string()) });
+        l.do_send(bee_dashboard::websocket::ServerEvent {
+            event: String::from(msg.to_string()),
+        });
     }
 
     status_changed();
 }
-/*
-fn new_transaction(new_transaction: &NewTransaction) {
-    for l in unsafe{bee_dashboard::websocket::get_listeners()} {
-        let mut value: i64 = new_transaction.value;
-        let mut tx_type: u8 = bee_dashboard::websocket::TX_VALUE;
-        if value == 0 as i64{
-            tx_type = bee_dashboard::websocket::TX_ZERO_VALUE;
-        }
-        let msg = json!({
-            "type": tx_type,
-            "data": {
-                "hash": new_transaction.hash,
-                "value": value,
-            }
-        });
-        l.do_send(bee_dashboard::websocket::ServerEvent{ event: String::from(msg.to_string()) });
-    }
-}
-*/
+// fn new_transaction(new_transaction: &NewTransaction) {
+// for l in unsafe{bee_dashboard::websocket::get_listeners()} {
+// let mut value: i64 = new_transaction.value;
+// let mut tx_type: u8 = bee_dashboard::websocket::TX_VALUE;
+// if value == 0 as i64{
+// tx_type = bee_dashboard::websocket::TX_ZERO_VALUE;
+// }
+// let msg = json!({
+// "type": tx_type,
+// "data": {
+// "hash": new_transaction.hash,
+// "value": value,
+// }
+// });
+// l.do_send(bee_dashboard::websocket::ServerEvent{ event: String::from(msg.to_string()) });
+// }
+// }
 
 pub(crate) struct DashboardPlugin {}
 
@@ -213,11 +209,10 @@ impl Plugin for DashboardPlugin {
     }
 
     fn init(&mut self, bus: Arc<Bus>, shutdown: &mut Shutdown) -> Result<(), Self::Error> {
-        
         bus.add_listener(tps);
         bus.add_listener(last_milestone_changed);
         bus.add_listener(last_solid_milestone_changed);
-        //bus.add_listener(new_transaction);
+        // bus.add_listener(new_transaction);
         bee_dashboard::websocket::init(shutdown);
         Ok(())
     }
@@ -226,4 +221,3 @@ impl Plugin for DashboardPlugin {
         Ok(())
     }
 }
-
