@@ -2,22 +2,12 @@ use std::time::{Duration, Instant};
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
 use actix::prelude::*;
-use chrono::Local;
-use serde_json::json;
 use bee_common::shutdown::Shutdown;
-use futures::{
-    channel::{mpsc, oneshot},
-};
 use std::sync::mpsc as sync_mpsc;
-use std::{ptr, thread, iter::Iterator};
-use async_std::task::{block_on, spawn};
-use log::{info, warn};
+use std::{ptr, thread};
+use async_std::task::{block_on};
+use log::{warn};
 use crate::controller::static_files;
-
-/// How often heartbeat pings are sent
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
-/// How long before lack of client response causes a timeout
-const CLIENT_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub const SYNC_STATUS: u8 = 0;
 pub const STATUS: u8 = 1;
@@ -47,8 +37,6 @@ pub unsafe fn get_listeners() -> &'static Vec<Addr<DashboardWebSocket>>{
 static mut DASHBOARD: *const Dashboard = ptr::null();
 
 pub struct Dashboard {
-    //pub tps_worker: mpsc::Sender<super::tps::TpsWorkerEvent>,
-    //pub livefeed_worker: mpsc::Sender<super::livefeed::LivefeedWorkerEvent>,
 }
 
 impl Dashboard {
@@ -57,38 +45,8 @@ impl Dashboard {
             warn!("Already initialized.");
             return;
         }
-/*
-        let (dbsize_worker_shutdown_tx, dbsize_worker_shutdown_rx) = oneshot::channel();
-    
-        shutdown.add_worker_shutdown(
-            dbsize_worker_shutdown_tx,
-            spawn(unsafe{super::dbsize::DBSizeWorker::new().run(dbsize_worker_shutdown_rx)}),
-        );
-    
-    
-        let (tps_worker_tx, tps_worker_rx) = mpsc::channel(1000);
-        let (tps_worker_shutdown_tx, tps_worker_shutdown_rx) = oneshot::channel();
-    
-        shutdown.add_worker_shutdown(
-            tps_worker_shutdown_tx,
-            spawn(unsafe{super::tps::TpsWorker::new().run(tps_worker_rx, tps_worker_shutdown_rx)}),
-        );
-
-        let (livefeed_worker_tx, livefeed_worker_rx) = mpsc::channel(1000);
-        let (livefeed_worker_shutdown_tx, livefeed_worker_shutdown_rx) = oneshot::channel();
-    
-
-        shutdown.add_worker_shutdown(
-            livefeed_worker_shutdown_tx,
-            spawn(unsafe{super::livefeed::LivefeedWorker::new().run(
-                livefeed_worker_rx,
-                livefeed_worker_shutdown_rx,
-            )}),
-        );
-*/
+        
         let dashboard = Dashboard {
-            //tps_worker: tps_worker_tx,
-            //livefeed_worker: livefeed_worker_tx,
         };
 
         unsafe {
@@ -107,12 +65,9 @@ impl Dashboard {
 
 /// do websocket handshake and start `DashboardSocket` actor
 pub async fn ws_index(r: HttpRequest, stream: web::Payload, data: web::Data<Addr<ServerMonitor>>) -> Result<HttpResponse, Error> {
-    println!("{:?}", r);
     let (addr, res) = ws::start_with_addr(DashboardWebSocket::new(), &r, stream)?;
     unsafe {
         LISTENERS.push(addr);
-        //self.listeners.push(msg.addr);
-        println!("LISTENERS.len: {}", LISTENERS.len());
     }
     println!("{:?}", res);
     Ok(res)
@@ -242,8 +197,6 @@ pub fn init(shutdown: &mut Shutdown) -> (){
 pub async fn init_actix() -> std::io::Result<()> {
 
     let (tx, rx) = sync_mpsc::channel();
-
-    println!("url: {}", "hey");
 
     let srvmon = ServerMonitor { listeners: vec![] }.start();
 
