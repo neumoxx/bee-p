@@ -16,10 +16,13 @@ use bee_common_ext::event::Bus;
 use bee_protocol::event::{LatestMilestoneChanged, LatestSolidMilestoneChanged, TpsMetricsUpdated};
 use serde_json::json;
 
-use std::{convert::Infallible, sync::Arc, time::Instant};
+use std::{convert::Infallible, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
 fn tps(metrics: &TpsMetricsUpdated) {
-    let date = Instant::now();
+    let start = SystemTime::now();
+    let elapsed = start
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
 
     for l in unsafe { bee_dashboard::websocket::get_listeners() } {
         let msg = json!({
@@ -31,7 +34,7 @@ fn tps(metrics: &TpsMetricsUpdated) {
                 "stale": metrics.stale,
                 "invalid": metrics.invalid,
                 "outgoing": metrics.outgoing,
-                "ts": (date.elapsed().as_millis()),
+                "ts": elapsed.as_secs(),
             }
         });
         l.do_send(bee_dashboard::websocket::ServerEvent {
