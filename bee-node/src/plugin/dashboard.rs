@@ -12,7 +12,7 @@
 use crate::plugin::Plugin;
 
 use bee_common_ext::{event::Bus, shutdown_tokio::Shutdown};
-use bee_protocol::event::{LatestMilestoneChanged, LatestSolidMilestoneChanged, TpsMetricsUpdated};
+use bee_protocol::event::{LatestMilestoneChanged, LatestSolidMilestoneChanged, TransactionSolidified, TpsMetricsUpdated};
 use serde_json::json;
 
 use std::{convert::Infallible, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
@@ -80,6 +80,24 @@ fn last_solid_milestone_changed(last_solid_milestone: &LatestSolidMilestoneChang
     }
 }
 
+fn transaction_solidified(transaction: &TransactionSolidified) {
+    for l in unsafe { bee_dashboard::websocket::get_listeners() } {
+        let msg = json!({
+            "type": bee_dashboard::websocket::SOLID_INFO,
+            "data": {
+                "id": transaction
+                            .0
+                            .iter_trytes()
+                            .map(|trit| char::from(trit))
+                            .collect::<String>(),
+            }
+        });
+        l.do_send(bee_dashboard::websocket::ServerEvent {
+            event: String::from(msg.to_string()),
+        });
+    }
+}
+
 pub(crate) struct DashboardPlugin {}
 
 impl DashboardPlugin {
@@ -99,6 +117,7 @@ impl Plugin for DashboardPlugin {
         bus.add_listener(tps);
         bus.add_listener(last_milestone_changed);
         bus.add_listener(last_solid_milestone_changed);
+        bus.add_listener(transaction_solidified);
         bee_dashboard::websocket::init(shutdown);
         Ok(())
     }
