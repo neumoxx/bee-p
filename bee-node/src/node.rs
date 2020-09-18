@@ -73,10 +73,6 @@ impl NodeBuilder {
                 .await
                 .map_err(Error::SnapshotError)?;
 
-        info!("Initializing dashboard...");
-        bee_dashboard::websocket::spawn_workers(&mut shutdown);
-        bee_dashboard::websocket::init();
-
         info!("Initializing network...");
         let (network, events) = bee_network::init(self.config.network, &mut shutdown).await;
 
