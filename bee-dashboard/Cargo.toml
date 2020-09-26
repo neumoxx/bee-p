@@ -29,6 +29,7 @@ tokio = { version = "0.2.11", features = ["sync"] }
 clap = "2.32.0"
 url = "2.0"
 bee-common = { git = "https://github.com/iotaledger/bee.git", branch = "dev" }
+bee-common-ext = { path = "../bee-common-ext" }
 log = "0.4.8"
 async-std = "1.6.2"
 

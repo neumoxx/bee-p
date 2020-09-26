@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
 use actix::prelude::*;
-use bee_common::shutdown::Shutdown;
+use bee_common_ext::shutdown_tokio::Shutdown;
 use std::sync::mpsc as sync_mpsc;
 use std::{ptr, thread};
 use async_std::task::{block_on};

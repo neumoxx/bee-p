@@ -11,8 +11,7 @@
 
 use crate::plugin::Plugin;
 
-use bee_common::shutdown::Shutdown;
-use bee_common_ext::event::Bus;
+use bee_common_ext::{event::Bus, shutdown_tokio::Shutdown};
 use bee_protocol::event::{LatestMilestoneChanged, LatestSolidMilestoneChanged, TpsMetricsUpdated};
 use serde_json::json;
 
